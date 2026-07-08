@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # Main application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hiring-signal-app
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-hiring_signal}
+      - DB_PASSWORD=${DB_PASSWORD:-hiring_signal_pass}
+      - DB_NAME=${DB_NAME:-hiring_signal_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - SCHEDULER_ENABLED=true
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - hiring-signal-network
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: hiring-signal-postgres
+    environment:
+      - POSTGRES_USER=${DB_USER:-hiring_signal}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-hiring_signal_pass}
+      - POSTGRES_DB=${DB_NAME:-hiring_signal_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-hiring_signal}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hiring-signal-network
+
+  # Redis for Celery (optional) and caching
+  redis:
+    image: redis:7-alpine
+    container_name: hiring-signal-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hiring-signal-network
+
+  # Ollama for local AI (optional)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: hiring-signal-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles:
+      - ai
+    networks:
+      - hiring-signal-network
+
+networks:
+  hiring-signal-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
